@@ -26,38 +26,48 @@ public class DogApiBreedFetcher implements BreedFetcher {
      * @throws BreedNotFoundException if the breed does not exist (or if the API call fails for any reason)
      */
     @Override
-    public List<String> getSubBreeds(String breed) {
-        // TODO Task 1: Complete this method based on its provided documentation
-        //      and the documentation for the dog.ceo API. You may find it helpful
-        //      to refer to the examples of using OkHttpClient from the last lab,
-        //      as well as the code for parsing JSON responses.
-        // return statement included so that the starter code can compile and run.
-
+    public List<String> getSubBreeds(String breed) throws BreedNotFoundException {
         String urlMain = "https://dog.ceo/api/breed/" + breed + "/list";
-        Request request = new Request.Builder()
-                .url(urlMain)
-                .build();
-        try (Response response = client.newCall(request).execute()) {
-            ResponseBody body =  response.body();
-            if (body != null && !response.isSuccessful()) {
-                String json = body.string();
-                JSONObject jsonObject = new JSONObject(json);
-                JSONArray jsonArray = jsonObject.getJSONArray("message");
 
-                ArrayList<String> subBreeds = new ArrayList<>(jsonArray.length());
-                for (int i = 0; i < jsonArray.length(); i++) {
-                    subBreeds.add(jsonArray.getString(i));
-                }
-                return subBreeds;
+        Request request = new Request.Builder().url(urlMain).build();
+
+        try (Response response = client.newCall(request).execute()) {
+            // 1) HTTP-level errors -> BreedNotFoundException
+            if (!response.isSuccessful()) {
+                throw new BreedNotFoundException("HTTP " + response.code() + " for breed '" + breed + "'");
             }
 
-            throw new BreedNotFoundException("Failed to fetch sub-breeds for '" + breed +
-                    "'. HTTP " + response.code());
+            ResponseBody body = response.body();
+            if (body == null) {
+                throw new BreedNotFoundException("Empty body for breed '" + breed + "'");
+            }
 
-        }
+            String json = body.string(); // note: can be called only once
+            JSONObject obj = new JSONObject(json);
 
-        catch (IOException e) {
-            throw new RuntimeException(e);
+            // 2) API-level status check
+            String status = obj.optString("status", "");
+            if (!"success".equalsIgnoreCase(status)) {
+                // Dog CEO tends to return {"status":"error","message":"..."} on unknown breeds
+                String apiMsg = obj.optString("message", "Unknown API error");
+                throw new BreedNotFoundException("API error for '" + breed + "': " + apiMsg);
+            }
+
+            // 3) Happy path: parse the array
+            JSONArray arr = obj.getJSONArray("message");
+            List<String> subBreeds = new ArrayList<>(arr.length());
+            for (int i = 0; i < arr.length(); i++) {
+                subBreeds.add(arr.getString(i));
+            }
+            return subBreeds;
+
+        } catch (IOException e) {
+            // Network/IO -> wrap
+            throw new BreedNotFoundException("IO error for '" + breed + "': " + e.getMessage());
+        } catch (org.json.JSONException e) {
+            // Unexpected/malformed JSON -> wrap
+            throw new BreedNotFoundException("JSON error for '" + breed + "': " + e.getMessage());
         }
     }
+
 }
